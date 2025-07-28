@@ -1,63 +1,148 @@
-# OIDC Utilities - Go Modules Overview
+# gooidc — OIDC & JWT Utilities for Go
 
-This repository provides utility functions for working with JWT payloads and for administering OIDC clients (e.g., on a Keycloak server).
-
-## Module & Function Overview
-
-### 1. `decode_payload_map.go`
-
-#### - `DecodePayloadToMap(seg string) (map[string]interface{}, error)`
-**Purpose:** Decodes the payload (middle part) of a JWT, which is a base64-encoded JSON string, into a Go map (`map[string]interface{}`).
-**How:** It adds padding to the string if necessary, decodes the string from base64, and then unmarshals the JSON.
+Utilities and interfaces for decoding JWTs and administering OIDC clients in Go, with support for Keycloak and Azure Entra ID (formerly Azure AD). Usable as a Go module: `github.com/tenzoki/gooidc`.
 
 ---
 
-### 2. `jwt_decoder.go`
+## Features
 
-#### - `func (a *audList) UnmarshalJSON(data []byte) error`
-**Purpose:** Custom unmarshal logic for the JWT `aud` claim, so it accepts both a string or an array of strings.
-**How:** Tries to unmarshal as a string, if that fails, tries as an array of strings; errors otherwise.
-
-#### - `DecodeJWT(token string) (*JWT, error)`
-**Purpose:** Decodes a JWT string into its header, payload, and signature, parsing the payload (claims) into a strongly-typed struct.
-**How:** Splits the JWT into three parts (header, payload, signature), base64-decodes each, and then JSON-unmarshals the results.
-
-#### - `decodeSegment(seg string) ([]byte, error)`
-**Purpose:** Helper for decoding single JWT base64url-encoded segments, with padding fixup.
-**How:** Adds base64 padding if needed, and decodes.
+- Decode JWTs to Go structs or arbitrary maps.
+- Programmatically create/administer OIDC clients — both user and service clients for [Keycloak](https://www.keycloak.org/) or [Azure Entra ID](https://azure.microsoft.com/en-us/products/entra-id) (enterprise only allows service clients).
+- High-level, provider-agnostic interface for admin operations (via a factory method).
 
 ---
 
-### 3. `oidc_client_man.go`
+## Installation
 
-#### - `findKeycloakClientByClientID(ctx context.Context, clientId string) (*KeycloakClient, error)`
-**Purpose:** Looks up a Keycloak client (by `clientId`) using admin privileges.
-**How:** Calls Keycloak admin REST API to retrieve client JSON.
+```
+go get github.com/tenzoki/gooidc
+```
 
-#### - `getClientSecret(ctx context.Context, clientUuid string) (string, error)`
-**Purpose:** Retrieves the secret for a Keycloak client, using admin API and client UUID.
-**How:** Calls relevant Keycloak API endpoint, extracts secret from JSON response.
-
-#### - `NewClientManager(endpoint string, httpClient *http.Client) *ClientManager`
-**Purpose:** Constructor for `ClientManager`, sets up struct for OIDC admin usage.
-**How:** Reads config from environment variables, fills struct.
-
-#### - `getAdminToken(ctx context.Context) (string, error)`
-**Purpose:** Retrieves (and caches) admin access token for Keycloak REST API.
-**How:** Submits password grant to Keycloak's `admin-cli` endpoint.
-
-#### - `CreateUserClient(ctx context.Context, id string, redirectURIs, scopes []string) (*OAuth2Client, error)`
-**Purpose:** Creates a user-type OAuth2 client in Keycloak with the specified properties.
-**How:** Marshals client config, POSTs to Keycloak API, extracts details and secret for return.
-
-#### - `CreateServiceClient(ctx context.Context, id string, scopes []string) (*OAuth2Client, error)`
-**Purpose:** Creates a service-account OAuth2 client in Keycloak.
-**How:** POSTs suitable config, returns the registration (including secret).
-
-#### - `ListClients(ctx context.Context) ([]OAuth2Client, error)`
-**Purpose:** Lists all OAuth2 clients visible to admin in the current Keycloak instance.
-**How:** Calls Keycloak API to retrieve, parses into Go structs.
+```go
+import "github.com/tenzoki/gooidc"
+```
 
 ---
 
-**If you want more details on any specific function (like parameter/return types or to see the implementation), check the respective Go file for documentation or implementation specifics.**
+## OIDC Client Management Usage
+
+### Unified Interface
+
+Use the factory function to instantiate a provider-specific client manager:
+
+```go
+mgr := gooidc.NewOIDCClientManager(providerName, args...)
+```
+
+- For Keycloak: `providerName = "kc"`, args = endpointURL (string), httpClient
+- For Entra ID: `providerName = "entra"`, args = tenantID, clientID, clientSecret, httpClient
+
+### Example: Keycloak
+
+```go
+import (
+  "context"
+  "net/http"
+  "github.com/tenzoki/gooidc"
+)
+
+mgr := gooidc.NewOIDCClientManager("kc", "http://localhost:8080", &http.Client{})
+
+userClient, err := mgr.CreateUserClient(context.Background(), "demo-client", []string{"http://localhost/cb"}, []string{"openid"})
+svcClient, err := mgr.CreateServiceClient(context.Background(), "service-client", []string{"openid"})
+```
+
+#### Keycloak configuration
+- Reads realm, admin user/pass from environment: `KEYCLOAK_REALM`, `KEYCLOAK_ADMIN_USER`, `KEYCLOAK_ADMIN_PASSWORD` (defaults: `maccs-demo`, `admin`, `admin`).
+
+### Example: Azure Entra ID (Azure AD)
+
+```go
+import (
+  "context"
+  "net/http"
+  "github.com/tenzoki/gooidc"
+)
+
+mgr := gooidc.NewOIDCClientManager(
+  "entra",
+  "your-tenant-id",
+  "your-client-id",
+  "your-client-secret",
+  &http.Client{},
+)
+
+// Only service clients supported
+svcClient, err := mgr.CreateServiceClient(context.Background(), "service-app", []string{"/.default"})
+
+// This will always error:
+_, err := mgr.CreateUserClient(context.Background(), "app-client", []string{"http://localhost/cb"}, []string{"openid"})
+// err != nil (not supported)
+```
+
+---
+
+## JWT Decoding Utilities
+
+- `DecodePayloadToMap(seg string) (map[string]interface{}, error)` — Convert a JWT payload segment to a map.
+- `DecodeJWT(token string) (*JWT, error)` — Parse a full JWT (header, payload, signature, Go types for claims).
+- Handles `aud` claim as string or array.
+
+---
+
+## File & API Overview
+
+| File                       | Key Methods / Types |
+|----------------------------|---------------------|
+| `decode_payload_map.go`    | `DecodePayloadToMap()` |
+| `jwt_decoder.go`           | `DecodeJWT()`, type `JWT`, claim parsing |
+| `oidc_client_manager.go`   | `OIDCClientManager` interface, `OAuth2Client`, factory, exported |
+| `oidc_client_man_for_kc.go`| Keycloak implementation |
+| `oidc_client_man_for_entra.go` | Entra/Azure implementation |
+
+---
+
+## Demo App Example
+
+See `demo_app/main.go` for a concise example covering both providers.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "net/http"
+    "time"
+    "github.com/tenzoki/gooidc"
+)
+
+func main() {
+    ctx := context.Background()
+    httpClient := &http.Client{Timeout: 10 * time.Second}
+
+    // Keycloak example
+    kcMgr := gooidc.NewOIDCClientManager("kc", "http://localhost:8080", httpClient)
+    userClient, err := kcMgr.CreateUserClient(ctx, "demo-client", []string{"http://localhost/cb"}, []string{"openid"})
+    svcClient, err := kcMgr.CreateServiceClient(ctx, "service-client", []string{"openid"})
+
+    // Entra example
+    entraMgr := gooidc.NewOIDCClientManager("entra", "your-tenant-id", "your-client-id", "your-client-secret", httpClient)
+    entraSvc, err := entraMgr.CreateServiceClient(ctx, "entra-client", []string{"/.default"})
+    _, err = entraMgr.CreateUserClient(ctx, "not-allowed", []string{"http://localhost/cb"}, []string{"openid"})
+    // ...
+}
+```
+
+---
+
+## Compatibility
+
+- Go 1.20+
+- Keycloak (tested against 18+), or Azure Entra ID
+
+---
+
+## License
+
+MIT or Apache 2.0 (see repo).
