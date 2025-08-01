@@ -1,3 +1,3 @@
-module github.com/user/oidc
+module github.com/tenzoki/oidcgo
 
 go 1.24.3

@@ -145,4 +145,4 @@ func main() {
 
 ## License
 
-MIT or Apache 2.0 (see repo).
+This project is licensed under the [European Union Public Licence v1.2 (EUPL)](https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12).
